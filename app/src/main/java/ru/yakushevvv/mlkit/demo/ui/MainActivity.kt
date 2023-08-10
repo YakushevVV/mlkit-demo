@@ -7,19 +7,18 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.LifecycleCameraController
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.concurrent.futures.await
 import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.facemesh.FaceMeshDetection
 import com.google.mlkit.vision.facemesh.FaceMeshDetector
@@ -43,10 +42,12 @@ class MainActivity : ComponentActivity() {
         if (!isGranted) {
             // Без разрешения на работу с камерой продолжать нет смысла. Поэтому ругаемся
             // и снова просим разрешение.
-            Toast.makeText(this, getString(R.string.permission_not_granted), Toast.LENGTH_LONG).show()
+            Toast.makeText(this, getString(R.string.permission_not_granted), Toast.LENGTH_LONG)
+                .show()
             requestPermission()
         }
     }
+
     // Объект для анализа изображения с камеры и поиска на нем людей.
     // Настроен на поиск в потоковом режиме и возвращаем маску в исходном размере изображения
     private val selfieSegmenter = Segmentation.getClient(
@@ -63,21 +64,11 @@ class MainActivity : ComponentActivity() {
             .build()
     )
 
-    // Сценарий для анализа изображений с камеры. Говорим, что будем работать только
-    // с последним использованным изображением и не будем хранить пул изображений.
-    // Также для меньших затрат на масштабирование, выбираем размеры изображения в
-    // пропорции 16:9. Получаемые изображения просим в YUV-формате.
-    private val imageAnalysis = ImageAnalysis.Builder()
-        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-        .setTargetAspectRatio(AspectRatio.RATIO_16_9)
-        .build()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             SelfieSegmentationTheme {
-                CameraView(imageAnalysis, selfieSegmenter, faceDetector)
+                CameraView(selfieSegmenter, faceDetector)
             }
         }
         requestPermission()
@@ -97,45 +88,37 @@ class MainActivity : ComponentActivity() {
 /**
  * Получаем виджет для отображения.
  *
- * Создаем [провайдер][ProcessCameraProvider] для работы с камерой и передаем
- * в него [сценарий анализа изображений][imageAnalysis]. В качестве виджета используем
- * нашу собственную реализацию - [AnalysisView]. Данный виджет призван в один момент
- * отображать и изображение с камеры, и слои, полученные от MLKit. Если не отображать
- * одновременно, то при движении распознанные слои будут отставать от изображения.
+ * Создаем [контроллер камеры][LifecycleCameraController] для работы с камерой и настраиваем
+ * его для работы со сценарием анализа изображений. В качестве виджета для отображения
+ * слоев распознавания образов используем нашу собственную реализацию - [AnalysisView].
  *
- * @param imageAnalysis сценарий для анализа изображений с камеры
  * @param segmenter объект, для распознавания людей на изображении
  * @param faceDetector объект, для распознавания лиц на изображении
  */
 @Composable
 fun CameraView(
-    imageAnalysis: ImageAnalysis,
     segmenter: Segmenter,
     faceDetector: FaceMeshDetector
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val analysisView = remember { AnalysisView(context) }
-
-    // Передаем в сценарий анализа изображений наш анализатор, который будет
-    // передавать изображение в модели для поиска лиц и людей на изображении.
-    // Потом на основе ответа от моделей формировать слои и передавать их в AnalysisView.
-    imageAnalysis.setAnalyzer(
-        ContextCompat.getMainExecutor(context),
-        CameraAnalyzer(analysisView, segmenter, faceDetector)
-    )
+    val previewView = remember { PreviewView(context) }
+    val cameraAnalyzer = CameraAnalyzer(analysisView, segmenter, faceDetector)
 
     // Создаем провайдер камеры, который настраиваем на фронтальную камеру и наш
     // сценарий для обработки изображений.
-    val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
-    LaunchedEffect(cameraSelector) {
-        val cameraProvider = ProcessCameraProvider.getInstance(context).await()
-        cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
+    val cameraController = LifecycleCameraController(context).also {
+        it.cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+        it.imageAnalysisBackpressureStrategy = ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST
+        it.setImageAnalysisAnalyzer(ContextCompat.getMainExecutor(context), cameraAnalyzer)
+        it.bindToLifecycle(lifecycleOwner)
     }
 
-    AndroidView(
-        { analysisView },
-        modifier = Modifier.fillMaxSize()
-    )
+    previewView.controller = cameraController
+
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        AndroidView(factory = { analysisView }, modifier = Modifier.fillMaxSize())
+    }
 }

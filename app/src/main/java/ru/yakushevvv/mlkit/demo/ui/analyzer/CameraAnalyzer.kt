@@ -1,5 +1,6 @@
 package ru.yakushevvv.mlkit.demo.ui.analyzer
 
+import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.common.InputImage
@@ -11,9 +12,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import ru.yakushevvv.mlkit.demo.ui.util.get
-import ru.yakushevvv.mlkit.demo.ui.util.toBitmap
 import ru.yakushevvv.mlkit.demo.ui.widget.AnalysisView
-import ru.yakushevvv.mlkit.demo.ui.widget.layer.BitmapLayer
 import ru.yakushevvv.mlkit.demo.ui.widget.layer.FaceDetectorLayer
 import ru.yakushevvv.mlkit.demo.ui.widget.layer.SegmentationMaskLayer
 
@@ -33,12 +32,13 @@ class CameraAnalyzer(
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
+    @ExperimentalGetImage
     override fun analyze(imageProxy: ImageProxy) {
         scope.launch {
             // получаем `Bitmap` для слоя изображения с камеры и его же используем
             // для получения `InputImage`, которое будет отправляться моделям
-            val bitmap = imageProxy.toBitmap()
-            val inputImage = InputImage.fromBitmap(bitmap, 0)
+            val inputImage =
+                InputImage.fromMediaImage(imageProxy.image!!, imageProxy.imageInfo.rotationDegrees)
 
             // Выполняем обработку изображений для поиска людей и лиц.
             // Используется собственный extension-метод `async()` для
@@ -49,7 +49,6 @@ class CameraAnalyzer(
             // формируем слои от нижнего к верхнему: изображение с камеры,
             // маска выделяющая людей и прямоугольники с границами лиц
             val layers = listOf(
-                BitmapLayer(bitmap),
                 SegmentationMaskLayer(selfieMask.await()),
                 FaceDetectorLayer(faces.await())
             )
