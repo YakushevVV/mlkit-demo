@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Selfie Segmentation</string>
+    <string name="permission_not_granted">Permission must granted</string>
+</resources>
