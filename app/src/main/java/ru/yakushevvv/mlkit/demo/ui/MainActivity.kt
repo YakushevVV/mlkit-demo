@@ -10,7 +10,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -116,14 +119,21 @@ fun CameraView(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val analysisView = remember { AnalysisView(context) }
+    val previewView = remember { PreviewView(context) }
 
     // Передаем в сценарий анализа изображений наш анализатор, который будет
     // передавать изображение в модели для поиска лиц и людей на изображении.
     // Потом на основе ответа от моделей формировать слои и передавать их в AnalysisView.
     imageAnalysis.setAnalyzer(
         ContextCompat.getMainExecutor(context),
-        CameraAnalyzer(analysisView, segmenter, faceDetector)
+        CameraAnalyzer(
+            analysisView,
+            segmenter,
+            faceDetector
+        )
     )
+
+    val preview = Preview.Builder().build()
 
     // Создаем провайдер камеры, который настраиваем на фронтальную камеру и наш
     // сценарий для обработки изображений.
@@ -131,11 +141,13 @@ fun CameraView(
     LaunchedEffect(cameraSelector) {
         val cameraProvider = ProcessCameraProvider.getInstance(context).await()
         cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
+        cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalysis)
+
+        preview.setSurfaceProvider(previewView.surfaceProvider)
     }
 
-    AndroidView(
-        { analysisView },
-        modifier = Modifier.fillMaxSize()
-    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView({ previewView }, modifier = Modifier.fillMaxSize())
+        AndroidView({ analysisView }, modifier = Modifier.fillMaxSize())
+    }
 }
